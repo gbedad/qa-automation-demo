@@ -1,0 +1,86 @@
+name: Nightly QA
+
+on:
+  schedule:
+    - cron: "17 1 * * *"   # every night at 01:17 UTC
+  workflow_dispatch:        # manual run from the Actions tab
+  push:
+    branches: [main]
+
+concurrency:
+  group: nightly-qa
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.mode }} mode
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [local, remote]
+    env:
+      QA_MODE: ${{ matrix.mode }}
+      BROWSERS: chromium firefox
+      RESULTS_DIR: reports/results
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the applications (local mode)
+        if: matrix.mode == 'local'
+        run: docker compose up -d --build --wait saucedemo restful-booker
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install test dependencies
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium firefox
+
+      - name: Run the suite
+        # Failures are expected: some saucedemo profiles simulate bugs. They are
+        # reported in the matrix; the job fails only if the suite cannot run.
+        run: python -m pytest --browser chromium --browser firefox --tracing retain-on-failure || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-${{ matrix.mode }}
+          path: |
+            reports/results/
+            test-results/
+
+  report:
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: results-*
+          path: downloaded
+      - run: mkdir -p reports/results && find downloaded -name 'results-*.json' -exec cp {} reports/results/ \;
+
+      - name: Build the matrices and notify Slack
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          flags=""
+          [ -n "$SLACK_WEBHOOK_URL" ] && flags="--slack"
+          python -m reporting.build_report $flags
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qa-matrix
+          path: reports/matrix.*

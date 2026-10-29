@@ -1,0 +1,42 @@
+# Local mode: install both applications in containers, then test them on localhost.
+#
+#   docker compose up -d --build saucedemo restful-booker   # install the apps
+#   QA_MODE=local ./scripts/run_suite.sh                    # test from the host
+#   docker compose run --rm tests                           # ...or from a container
+
+services:
+  saucedemo:
+    build:
+      context: .
+      dockerfile: docker/saucedemo.Dockerfile
+    ports: ["3000:3000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      retries: 20
+
+  restful-booker:
+    build:
+      context: .
+      dockerfile: docker/restful-booker.Dockerfile
+    ports: ["3001:3001"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/ping').then(r=>process.exit(r.status===201?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      retries: 20
+
+  tests:
+    build:
+      context: .
+      dockerfile: docker/tests.Dockerfile
+    profiles: ["tests"]
+    environment:
+      QA_MODE: local
+      SAUCE_URL: http://saucedemo:3000
+      BOOKER_URL: http://restful-booker:3001
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+    volumes:
+      - ./reports:/qa/reports
+    depends_on:
+      saucedemo: {condition: service_healthy}
+      restful-booker: {condition: service_healthy}
