@@ -19,6 +19,7 @@ from reporting import slack
 
 ICONS = {"passed": "✅", "failed": "❌", "error": "⚠️", "skipped": "⏭️", None: "·"}
 SHORT = {"passed": "✔", "failed": "✘", "error": "!", "skipped": "-", None: "·"}
+SEVERITY = {"passed": 0, "skipped": 1, "failed": 2, "error": 3}
 
 
 @dataclass
@@ -29,13 +30,21 @@ class Matrix:
     columns: list = field(default_factory=list)
     cells: dict = field(default_factory=dict)  # (row, column) -> result dict
 
-    def add(self, result):
+    def add(self, result, run_index: int):
         row, col = result["row"], result["column"]
         if row not in self.rows:
             self.rows.append(row)
         if col not in self.columns:
             self.columns.append(col)
-        self.cells[(row, col)] = result
+        current = self.cells.get((row, col))
+        if current is None or current["run"] != run_index:
+            # First result for this cell, or a newer run: it replaces the old one.
+            self.cells[(row, col)] = {**result, "run": run_index}
+            return
+        # Several tests in the same cell (e.g. one per city): the worst one wins.
+        current["duration"] += result["duration"]
+        if SEVERITY[result["status"]] > SEVERITY[current["status"]]:
+            current.update(status=result["status"], message=result["message"])
 
     @property
     def counts(self) -> Counter:
@@ -50,14 +59,14 @@ def load_runs(results_dir: Path) -> list[dict]:
 def build(runs: list[dict]):
     matrices: dict[tuple, Matrix] = {}
     standalone: dict[str, dict] = {}
-    for run in runs:
+    for run_index, run in enumerate(runs):
         for result in run["results"]:
             result = {**result, "mode": run["mode"]}
             if result["row"] is None:
                 standalone[f'{run["mode"]}::{result["nodeid"]}'] = result
                 continue
             key = (result["matrix"], run["mode"])
-            matrices.setdefault(key, Matrix(result["matrix"], run["mode"])).add(result)
+            matrices.setdefault(key, Matrix(result["matrix"], run["mode"])).add(result, run_index)
     return list(matrices.values()), list(standalone.values())
 
 

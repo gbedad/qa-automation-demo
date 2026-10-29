@@ -25,12 +25,13 @@ jobs:
       BROWSERS: chromium firefox
       RESULTS_DIR: reports/results
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      DB_REQUIRED: "1"   # an unreachable database is a failure, not a skip
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install the applications (local mode)
+      - name: Install the applications and database servers (local mode)
         if: matrix.mode == 'local'
-        run: docker compose up -d --build --wait saucedemo restful-booker
+        run: docker compose --profile databases up -d --build --wait
 
       - uses: actions/setup-python@v5
         with:

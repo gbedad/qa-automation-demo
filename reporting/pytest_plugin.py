@@ -35,6 +35,9 @@ def _locate(item):
     if "tests/ui" in item.nodeid.replace("\\", "/"):
         browser = item.funcargs.get("browser_name") or params.get("browser_name", "chromium")
         return f"UI · {browser}", params.get("user")
+    if "tests/db" in item.nodeid.replace("\\", "/"):
+        target = params.get("db_target")
+        return f"DB · {target.family}", target.version
     dataset = params.get("dataset")
     return "API · restful-booker", dataset
 

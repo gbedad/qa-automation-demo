@@ -1,10 +1,42 @@
-# Local mode: install both applications in containers, then test them on localhost.
+# Local mode: install the applications and the database servers in containers,
+# then test them on localhost.
 #
-#   docker compose up -d --build saucedemo restful-booker   # install the apps
-#   QA_MODE=local ./scripts/run_suite.sh                    # test from the host
-#   docker compose run --rm tests                           # ...or from a container
+#   docker compose up -d --build --wait saucedemo restful-booker   # the apps
+#   docker compose --profile databases up -d --wait                # + 9 database servers
+#   ./scripts/run_suite.sh                                         # test from the host
+#   docker compose --profile tests run --rm tests                  # ...or from a container
+
+x-postgres: &postgres
+  profiles: ["databases"]
+  environment:
+    POSTGRES_USER: qa
+    POSTGRES_PASSWORD: qa_password
+  healthcheck:
+    test: ["CMD", "pg_isready", "-U", "qa"]
+    interval: 3s
+    retries: 30
+
+x-mysql: &mysql
+  profiles: ["databases"]
+  environment:
+    MYSQL_ROOT_PASSWORD: qa_password
+  healthcheck:
+    test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pqa_password"]
+    interval: 3s
+    retries: 40
+
+# Single-node replica set: MongoDB only supports transactions on replica sets.
+# The healthcheck initiates the replica set, then waits until the node is primary.
+x-mongo: &mongo
+  profiles: ["databases"]
+  command: ["--replSet", "rs0", "--bind_ip_all"]
+  healthcheck:
+    test: ["CMD", "mongosh", "--quiet", "--eval", "try { rs.status() } catch (e) { rs.initiate({_id: 'rs0', members: [{_id: 0, host: 'localhost:27017'}]}) }; if (!db.hello().isWritablePrimary) quit(1)"]
+    interval: 3s
+    retries: 40
 
 services:
+  # --- Applications ------------------------------------------------------------
   saucedemo:
     build:
       context: .
@@ -25,6 +57,18 @@ services:
       interval: 5s
       retries: 20
 
+  # --- Database servers: one per version (ports match databases/targets.py) ----
+  postgres-14: {<<: *postgres, image: "postgres:14", ports: ["5414:5432"]}
+  postgres-15: {<<: *postgres, image: "postgres:15", ports: ["5415:5432"]}
+  postgres-16: {<<: *postgres, image: "postgres:16", ports: ["5416:5432"]}
+  postgres-17: {<<: *postgres, image: "postgres:17", ports: ["5417:5432"]}
+  mysql-8.0: {<<: *mysql, image: "mysql:8.0", ports: ["3380:3306"]}
+  mysql-8.4: {<<: *mysql, image: "mysql:8.4", ports: ["3384:3306"]}
+  mongo-6.0: {<<: *mongo, image: "mongo:6.0", ports: ["27060:27017"]}
+  mongo-7.0: {<<: *mongo, image: "mongo:7.0", ports: ["27070:27017"]}
+  mongo-8.0: {<<: *mongo, image: "mongo:8.0", ports: ["27080:27017"]}
+
+  # --- Test runner (optional) ----------------------------------------------------
   tests:
     build:
       context: .
@@ -34,7 +78,9 @@ services:
       QA_MODE: local
       SAUCE_URL: http://saucedemo:3000
       BOOKER_URL: http://restful-booker:3001
+      DB_HOST: host.docker.internal   # databases are reached on their published ports
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+    extra_hosts: ["host.docker.internal:host-gateway"]
     volumes:
       - ./reports:/qa/reports
     depends_on:

@@ -2,3 +2,8 @@ pytest==9.1.1
 pytest-playwright==0.10.0
 playwright==1.63.0
 requests>=2.32
+# Database drivers
+psycopg[binary]==3.3.6
+PyMySQL==1.2.3
+cryptography>=43     # MySQL 8 default authentication (caching_sha2_password)
+pymongo==4.19.0

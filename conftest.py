@@ -5,6 +5,10 @@ from api import BookerClient
 
 pytest_plugins = ["reporting.pytest_plugin"]
 
+# The database servers are always installed locally (Docker), like a product
+# installed at a customer site: there is nothing to test in remote mode.
+collect_ignore = ["tests/db"] if config.MODE == "remote" else []
+
 
 # --- UI fixtures -------------------------------------------------------------
 
